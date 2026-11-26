@@ -9,7 +9,8 @@ bpy.ops.object.delete(use_global=False)
 rng = random.Random(71)
 scene = bpy.context.scene
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 48
+scene.cycles.samples = 64
+scene.cycles.sample_clamp_indirect = 2.5
 scene.cycles.use_denoising = False
 scene.render.resolution_x = 600
 scene.render.resolution_y = 760
@@ -54,7 +55,7 @@ bpy.context.object.data.materials.append(material('Black floor', (.003,.003,.003
 
 groom = bpy.data.curves.new('Centre-parted champagne blonde', 'CURVE')
 groom.dimensions = '3D'
-groom.bevel_depth = .0017
+groom.bevel_depth = .0022
 groom.bevel_resolution = 0
 for color in [(0.31,.17,.075),(.49,.29,.13),(.64,.43,.23),(.8,.6,.36),(.94,.76,.53)]:
     mat = material('Champagne fibre', color, .32)
@@ -69,12 +70,15 @@ obj = bpy.data.objects.new('Blonde groom • editable individual fibres', groom)
 scene.collection.objects.link(obj)
 
 for side in (-1,1):
+    locks = [(rng.uniform(-1,1), rng.uniform(-.9,.9), rng.uniform(.83,1.19))
+             for _ in range(19)]
     for i in range(3900):
+        drift, offset, length = locks[i % len(locks)]
         lane = rng.random()
         jitter = rng.gauss(0,.024)
         fur = i % 19 == 0
-        phase = rng.gauss(0,.35)
-        end = rng.uniform(.06,.64) if i%6==0 else rng.uniform(.025,.16)
+        phase = offset + rng.gauss(0,.14)
+        end = max(.022, rng.gauss(.08,.075) + max(0,1-length)*2.9)
         spline = groom.splines.new('POLY')
         spline.points.add(48)
         spline.material_index = rng.choices(range(5), [8,20,35,28,9])[0]
@@ -100,8 +104,18 @@ for side in (-1,1):
                 x = scalp_x*(1-blend)+x*blend
                 z = scalp_z*(1-blend)+z*blend
                 y = root_y*(1-blend)+y*blend
-            x+=side*(.31+.45*lane)*max(0,(t-.85)/.15)**1.7
-            y-=.34*max(0,(t-.86)/.14)**2
+            # Locks keep their individual direction and settle tangentially onto the floor.
+            lock_weight = min(1, max(0, (t-.12)/.2))
+            lock_weight = lock_weight**2*(3-2*lock_weight)
+            x+=lock_weight*(.11*drift+.066*math.sin(t*25+offset*4))
+            y+=lock_weight*(.17*offset+.065*math.cos(t*23+offset*4))
+            if t > .78:
+                u = (t-.78)/.22
+                floor = u*u*(3-2*u)
+                pool = max(0,length-.85)*3.2*floor
+                x+=(-.22 if side==1 else -.78)*pool + .19*drift*floor
+                y-=(.45+.45*lane)*pool
+                z = z*(1-floor) + end*floor
             if fur:
                 x+=side*.08*math.sin(t*27+phase)*bell
             p.co=(x,y,z,1)
@@ -121,9 +135,9 @@ def light(name, pos, power, size, color):
     obj.location=pos
     point(obj,(0,0,2.3))
 
-light('Large silk key',(-3,-4,5.6),620,3,(1,.91,.8))
+light('Large silk key',(-3,-4,5.6),490,3,(1,.88,.76))
 light('Soft neutral fill',(2.5,-3,4),220,3,(.86,.92,1))
-light('Rim',(2,2,5),730,2,(1,.89,.75))
+light('Rim',(2,2,5),540,2,(1,.89,.75))
 bpy.ops.object.camera_add(location=(0,-10,3.1))
 camera=bpy.context.object
 scene.camera=camera

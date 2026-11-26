@@ -9,7 +9,7 @@ bpy.ops.object.delete(use_global=False)
 rng = random.Random(71)
 scene = bpy.context.scene
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 44
+scene.cycles.samples = 48
 scene.cycles.sample_clamp_indirect = 2.5
 scene.cycles.use_denoising = False
 scene.render.resolution_x = 520
@@ -73,49 +73,80 @@ style = sys.argv[-2]
 if style == 'film':
     for m,c in zip(groom.materials,[(.08,.011,.004),(.2,.035,.009),(.35,.065,.015),(.52,.115,.027),(.68,.19,.06)]):
         next(n for n in m.node_tree.nodes if n.type=='BSDF_HAIR_PRINCIPLED').inputs['Color'].default_value=(*c,1)
-    for i in range(6500):
-        group=i%38
-        angle=group/38*math.tau+rng.gauss(0,.18)
-        length=.7+.46*rng.random()+.18*math.sin(group*3)
-        front=math.cos(angle)
-        if front>.68: length*=.46
-        spline=groom.splines.new('POLY'); spline.points.add(36)
-        spline.material_index=rng.randrange(5)
-        for j,p in enumerate(spline.points):
-            t=j/36
-            spread=math.sin(min(t/.44,1)*1.57)
-            theta=angle+.82*math.sin(t*2.55)
-            r=.55*spread+.025+(.135+.055*math.sin(group))*math.sin(t*14+group*.36)*spread
-            x=math.sin(theta)*r
-            y=-math.cos(theta)*r
-            z=3.95-length*t+.07*math.sin(t*13+group*.45)*spread
-            p.co=(x,y,z,1);p.radius=.78*(1-.87*t**8)
+    def sample(points,t):
+        u=t*(len(points)-1)
+        k=min(int(u),len(points)-2)
+        f=u-k
+        a,b,c,d=[points[max(0,min(len(points)-1,k+j))] for j in (-1,0,1,2)]
+        return .5*((2*b)+(-a+c)*f+(2*a-5*b+4*c-d)*f*f+(-a+3*b-3*c+d)*f**3)
+    def lock(points, count, width, shade):
+        points=list(map(Vector,points))
+        for i in range(count):
+            x,y,z=[rng.gauss(0,width) for _ in range(3)]
+            curve=groom.splines.new('POLY');curve.points.add(40)
+            curve.material_index=min(4,max(0,shade+rng.choice([-1,0,0,0,1])))
+            for j,p in enumerate(curve.points):
+                t=j/40
+                q=sample(points,t)
+                w=.4+.6*math.sin(math.pi*t)
+                wave=.015*math.sin(t*11+x*24)*math.sin(math.pi*t)
+                p.co=(q.x+w*x+wave,q.y+w*y,q.z+w*z,1)
+                p.radius=.7*(1-.92*t**8)
+    # Crown and rear layers wrap around the mannequin.
+    for i in range(30):
+        a=i*math.tau/30
+        x,y=math.sin(a),math.cos(a)
+        if y<-.67: continue
+        lock([(x*.08,y*.10,3.95),(x*.41,y*.36,3.82),(x*.53,y*.38,3.53),
+              (x*.5,y*.39,3.19),(x*.62,y*.35,2.84+.17*math.sin(i))],130,.056,2)
+    for side in (-1,1):
+        for i in range(9):
+            z=3.76-i*.092 + .044*math.sin(i*2.1+side)
+            lock([(side*(.23+i*.024),-.29,z+.07),(side*.39,-.37,z),
+                  (side*.54,-.35,z-.12),(side*(.65+.09*math.sin(i*1.4+side)),-.29+.035*i,z-.14),
+                  (side*(.69-.012*i+.10*math.sin(i*1.3+side)), -.18+.025*i,z+.06+.06*math.cos(i))],230,.048,i%3+1)
+    for i in range(10):
+        k=i/9
+        lock([(.21,-.19,3.94-k*.05),(.06,-.39,3.93-k*.06),
+              (-.22,-.47,3.77-k*.08),(-.45,-.34,3.62-k*.055),
+              (-.63,-.26,3.72-k*.07)],170,.033,3)
 else:
-    for i in range(7000):
-        k=i%26
-        side=-1 if k%2 else 1
-        layer=k//2
-        cx=side*(.13+.17*math.sin(layer*1.37))
-        cy=.13*math.cos(layer*2)-.04
-        cz=3.76+layer*.057
-        angle=rng.uniform(-.5,1.6)
-        ringlet=layer<2
-        spline=groom.splines.new('POLY');spline.points.add(44)
-        spline.material_index=rng.randrange(1,5)
-        for j,p in enumerate(spline.points):
-            t=j/44
-            phase=t*(17 if ringlet else 4.6)+angle
-            r=(.09 if ringlet else .25)+rng.gauss(0,.016)
-            x=1.14*cx+r*math.cos(phase)+.12*side*t
-            y=cy+r*math.sin(phase)-.14*t
-            z=cz-(.99 if ringlet else .19)*t+.075*math.sin(phase)
-            p.co=(x,y,z,1);p.radius=.8*(1-.8*t**9)
+    # Each roll is a torus-like bundle with fibres following its curl.
+    rolls=[(-.27,-.19,3.77,.20),(.20,-.25,3.80,.19),(-.03,-.22,3.98,.26),
+           (-.24,-.14,4.13,.19),(.23,-.13,4.13,.20),(.04,-.10,4.36,.23),
+           (-.13,.06,4.48,.15),(.19,.08,4.30,.17),
+           (-.28,.19,3.94,.21),(.19,.22,4.04,.24),(0,.21,4.24,.26)]
+    for i,(x,y,z,r) in enumerate(rolls):
+        for j in range(580):
+            ring=rng.uniform(0,math.tau)
+            phase=rng.uniform(0,math.tau)
+            spread=rng.uniform(.02,.075)
+            curve=groom.splines.new('POLY');curve.points.add(38)
+            curve.material_index=rng.randrange(1,5)
+            for k,p in enumerate(curve.points):
+                t=k/38
+                a=phase+t*5.6
+                b=ring+t*3.0
+                rr=r+spread*math.cos(b)
+                p.co=(x+rr*math.cos(a),y+spread*math.sin(b)+.095*math.sin(a),z+rr*.77*math.sin(a),1)
+                p.radius=.74*(1-.82*t**8)
+    for side in (-1,1):
+        for j in range(700):
+            phase=rng.gauss(0,.36)
+            radius=rng.uniform(.059,.116)
+            curve=groom.splines.new('POLY');curve.points.add(50)
+            curve.material_index=rng.randrange(1,5)
+            for k,p in enumerate(curve.points):
+                t=k/50
+                a=t*math.tau*3.4+phase
+                p.co=(side*(.31+.08*t)+radius*math.cos(a),-.31+radius*math.sin(a),3.78-(.89+.11*radius/.116)*t,1)
+                p.radius=.78*(1-.85*t**8)
     petals=[material('Burgundy silk',(.24,.012,.041),.38), material('Rose silk',(.66,.19,.22),.41), material('Peach silk',(.82,.43,.31),.44)]
     gold=material('Gold seed',(.74,.38,.09),.28)
-    for i in range(26):
+    for i in range(19):
         a=i*2.3999
-        center=Vector((.52*math.cos(a),-.22+.17*math.sin(a),3.60+i*.039))
-        size=rng.uniform(.045,.072)
+        center=Vector((.52*math.cos(a),-.22+.17*math.sin(a),3.66+i*.045))
+        size=rng.uniform(.034,.095)
         for ring in range(2):
             for j in range(5):
                 q=j*math.tau/5+ring*.7
@@ -137,7 +168,7 @@ def light(name, pos, power, size, color):
     obj.location=pos
     point(obj,(0,0,2.3))
 
-light('Large silk key',(-3,-4,5.6),490,3,(1,.88,.76))
+light('Large silk key',(-3,-4,5.6),490,3,(1,.92,.87))
 light('Soft neutral fill',(2.5,-3,4),220,3,(.86,.92,1))
 light('Rim',(2,2,5),540,2,(1,.89,.75))
 bpy.ops.object.camera_add(location=(0,-10,3.1))

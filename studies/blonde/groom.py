@@ -9,7 +9,7 @@ bpy.ops.object.delete(use_global=False)
 rng = random.Random(71)
 scene = bpy.context.scene
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 24
+scene.cycles.samples = 48
 scene.cycles.use_denoising = False
 scene.render.resolution_x = 600
 scene.render.resolution_y = 760
@@ -88,6 +88,18 @@ for side in (-1,1):
             wave=math.sin(t*19+lane*3+phase)*(.047+.068*bell)*spread
             x=side*(.013+spread*(.34+.21*lane+.17*t+jitter)+wave)
             y=root_y+.10*math.sin(t*16+lane*4+phase)*spread-.19*t+lane*.07*t
+            # Route the visible hairline over the display head before the locks fall.
+            if t < .22:
+                u = t/.22
+                theta = .035 + u*1.85
+                root_y = -.31 + lane*.63
+                cross_section = math.sqrt(max(.07, 1-(root_y/.37)**2))
+                scalp_x = side*(.38+lane*.05)*cross_section*math.sin(theta)
+                scalp_z = 3.38+.58*cross_section*math.cos(theta)
+                blend = u**3
+                x = scalp_x*(1-blend)+x*blend
+                z = scalp_z*(1-blend)+z*blend
+                y = root_y*(1-blend)+y*blend
             x+=side*(.31+.45*lane)*max(0,(t-.85)/.15)**1.7
             y-=.34*max(0,(t-.86)/.14)**2
             if fur:

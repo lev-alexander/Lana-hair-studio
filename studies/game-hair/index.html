@@ -1,0 +1,55 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Lana | Hair-card test</title>
+<style>body{margin:0;background:#100c10;color:#f9e8db;text-align:center;font:16px system-ui}h1{font:italic 42px Georgia;margin:.5em}canvas{display:block;margin:auto;width:min(100%,940px);height:auto;touch-action:pan-y}button{padding:.5em;margin:.25em}</style>
+<h1>Hair-card material test</h1><p>Left · Standard alpha material &nbsp; / &nbsp; Right · Three.js Hair Shader</p>
+<button id="turn">Turn both samples</button><p id="status">Loading WebGL…</p>
+<script type="module">
+import * as T from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
+import {applyHairShader} from './hair-shader.mjs';
+const renderer=new T.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+renderer.setSize(920,470,false);
+document.body.append(renderer.domElement);
+const stage=new T.Scene(); stage.background=new T.Color(0x100c10);
+const camera=new T.OrthographicCamera(-2.4,2.4,1.23,-1.23,.1,30);
+camera.position.set(0,.1,6);camera.lookAt(0,0,0);
+stage.add(new T.HemisphereLight(0xffefe1,0x685d7a,1.6));
+const key=new T.DirectionalLight(0xffe2c9,3);key.position.set(-2,3,3);stage.add(key);
+const size=128, data=new Uint8Array(size*size*4), plain=new Uint8Array(data.length);
+for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+  const v=y/(size-1), u=x/(size-1)-.5, edge=.5*(1-.87*v**3);
+  const mask=Math.max(0,Math.min(1,(edge-Math.abs(u))*17));
+  const strand=.35+.65*Math.sin(x*1.71+Math.sin(v*4)*2)**2;
+  const k=(y*size+x)*4;
+  data.set([Math.round(mask*strand*255),Math.round(v*255),Math.round(127+95*Math.sin(x*8.3)),255],k);
+  plain.set([data[k],data[k],data[k],255],k);
+}
+function texture(bytes){
+  const tex=new T.DataTexture(bytes,size,size);tex.needsUpdate=true;
+  tex.magFilter=T.LinearFilter;tex.minFilter=T.LinearFilter;return tex;
+}
+const base=texture(plain), atlas=texture(data);
+function sample(x){
+  const group=new T.Group();group.position.x=x;stage.add(group);
+  for(let i=0;i<7;i++){
+    const geom=new T.PlaneGeometry(.52,1.7,12,28);
+    const pos=geom.attributes.position, uv=geom.attributes.uv;
+    for(let j=0;j<pos.count;j++){
+      const t=uv.getY(j), side=pos.getX(j);
+      pos.setXYZ(j,side+Math.sin(t*5+i*.21)*.19+(i-3)*.15*t,pos.getY(j),Math.cos(t*4+i*.4)*.12+(i-3)*.034+side*side);
+    }
+    geom.computeVertexNormals();
+    const m=new T.MeshStandardMaterial({color:0x97401e,side:T.DoubleSide,alphaMap:base,alphaTest:.31,roughness:.48});
+    const card=new T.Mesh(geom,m);card.name='hair_card';group.add(card);
+  }
+  return group;
+}
+const left=sample(-1.03),right=sample(1.03);
+applyHairShader(right,{THREE:T,renderer,atlas,color:'#97401e'});
+function paint(angle){
+  left.rotation.y=right.rotation.y=angle;
+  renderer.render(stage,camera);
+}
+paint(0);
+document.querySelector('#status').textContent='Ready · identical geometry on both sides';
+let turned=false;
+document.querySelector('#turn').addEventListener('click',()=>{turned=!turned;paint(turned?.57:0)});
+</script></html>

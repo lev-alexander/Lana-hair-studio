@@ -1,5 +1,6 @@
 import * as T from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 import encoded from './groom-data.js';
+import dense from './dense-data.js';
 
 const host=document.querySelector('#stage'), status=document.querySelector('#status');
 const reduce=matchMedia('(prefers-reduced-motion: reduce)');
@@ -38,49 +39,67 @@ mesh(sphere,0x161519,.75,[0,2.72,-.05],[.48,.21,.27]);
 const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0)), packed=new DataView(bytes.buffer);
 let seed=1907;
 function random(){seed=(1664525*seed+1013904223)>>>0;return seed/4294967296;}
-const nodes=25, guides=[], fibres=[], palette=[0xba8e60,0xd3ae7b,0xe5c89f,0xf4dbb5,0x9d7049].map(c=>new T.Color(c));
-const mobile=matchMedia('(max-width: 650px)').matches;
+const nodes=25, guides=[], fibres=[];
+const palette=[0x9e6c45,0xba895b,0xc6a273,0xdcc09a,0xead3ac].map(c=>new T.Color(c));
 for(let i=0;i<bytes.length;i+=102){
   const points=[];
   for(let j=0;j<17;j++){
     const o=i+j*6;
     points.push(new T.Vector3(packed.getInt16(o,true)/4096,packed.getInt16(o+4,true)/4096,-packed.getInt16(o+2,true)/4096));
   }
-  const path=new T.CatmullRomCurve3(points), g={points:path.getPoints(nodes-1),x:0,z:0,vx:0,vz:0,omega:9+random()*5};
-  guides.push(g);
-  const count=mobile?8:12;
-  for(let j=0;j<count;j++){
-    const radius=j===0?.067:.039*Math.sqrt(random());
-    const a=random()*Math.PI*2;
-    fibres.push({g,dx:Math.cos(a)*radius,dz:Math.sin(a)*radius,phase:random()*6.28,length:.90+.10*random(),color:palette[Math.floor(random()*palette.length)]});
-  }
+  guides.push({points,x:0,z:0,vx:0,vz:0,omega:9+random()*5});
 }
-const positions=new Float32Array(fibres.length*(nodes-1)*6);
+
+const zipped=Uint8Array.from(atob(dense),c=>c.charCodeAt(0));
+const data=new DataView(await new Response(new Blob([zipped]).stream()
+  .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+const stride=79, strandCount=data.byteLength/stride;
+const positions=new Float32Array(strandCount*nodes*3);
 const colours=new Float32Array(positions.length), rest=new Float32Array(positions.length);
 const weights=new Float32Array(positions.length/3);
-const tint=new T.Color(), samplePoint=new T.Vector3();
+const indices=new Uint32Array(strandCount*(nodes-1)*2);
+const fillDirection=new T.Vector3(-.4,.7,.58).normalize();
+const rimDirection=new T.Vector3(.67,.62,-.38).normalize();
+const tint=new T.Color();
 function smooth(x){x=T.MathUtils.clamp(x,0,1);return x*x*(3-2*x);}
-function fillRest(f,j,k){
-  const t=j/(nodes-1), sample=t*f.length*(nodes-1), n=Math.min(nodes-2,Math.floor(sample)), frac=sample-n;
-  samplePoint.copy(f.g.points[n]).lerp(f.g.points[n+1],frac);
-  const w=smooth(t/.19), fly=Math.sin(t*9+f.phase)*.009*w;
-  rest[k]=samplePoint.x+f.dx*w+fly;
-  rest[k+1]=Math.max(.015,samplePoint.y);
-  rest[k+2]=samplePoint.z+f.dz*w+fly*.62;
-  weights[k/3]=smooth(t/.53)*smooth(rest[k+1]/.55);
-  const light=.57+.32*Math.sin(t*13+f.phase)**2+.14*t;
-  tint.copy(f.color).multiplyScalar(light);
-  colours.set([tint.r,tint.g,tint.b],k);
-}
-fibres.forEach((f,i)=>{
-  for(let j=0;j<nodes-1;j++){
-    const k=(i*(nodes-1)+j)*6;fillRest(f,j,k);fillRest(f,j+1,k+3);
+for(let i=0;i<strandCount;i++){
+  const points=[], offset=i*stride, shade=palette[data.getUint8(offset)];
+  let x=0,y=0,z=0;
+  for(let j=0;j<13;j++){
+    const o=offset+1+j*6;
+    x+=data.getInt16(o,true);y+=data.getInt16(o+2,true);z+=data.getInt16(o+4,true);
+    points.push(new T.Vector3(x/1024,z/1024,-y/1024));
   }
-});
+  const mid=points[8];
+  let g=guides[0], distance=Infinity;
+  for(const candidate of guides){
+    const check=candidate.points[10].distanceToSquared(mid);
+    if(check<distance){distance=check;g=candidate;}
+  }
+  fibres.push(g);
+  const path=new T.CatmullRomCurve3(points);
+  const samples=path.getPoints(nodes-1);
+  for(let j=0;j<nodes;j++){
+    const v=i*nodes+j, k=v*3, t=j/(nodes-1), f=samples[j];
+    rest.set([f.x,Math.max(.015,f.y),f.z],k);
+    weights[v]=smooth(t/.53)*smooth(rest[k+1]/.55);
+    const tangent=samples[Math.min(j+1,nodes-1)].clone().sub(samples[Math.max(j-1,0)]).normalize();
+    const key=Math.sqrt(Math.max(0,1-tangent.dot(fillDirection)**2));
+    const rim=Math.sqrt(Math.max(0,1-tangent.dot(rimDirection)**2));
+    const root=.64+.36*smooth(t/.32);
+    tint.copy(shade).multiplyScalar(root*(.32+.51*key**3+.19*rim**7));
+    colours.set([tint.r,tint.g,tint.b],k);
+    if(j<nodes-1){
+      const edge=(i*(nodes-1)+j)*2;
+      indices[edge]=v;indices[edge+1]=v+1;
+    }
+  }
+}
 const geom=new T.BufferGeometry();
 const attr=new T.BufferAttribute(positions,3);attr.setUsage(T.DynamicDrawUsage);
 geom.setAttribute('position',attr);geom.setAttribute('color',new T.BufferAttribute(colours,3));
-const hair=new T.LineSegments(geom,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.76}));
+geom.setIndex(new T.BufferAttribute(indices,1));
+const hair=new T.LineSegments(geom,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.70}));
 hair.frustumCulled=false;rig.add(hair);
 
 // Each bloom is modelled with cupped petals, a textured centre and a short stem.
@@ -145,7 +164,7 @@ function draw(time){
   for(const g of guides){
     let dx=0, influence=0;
     if(active){
-      for(let j=5;j<22;j+=2){
+      for(let j=4;j<16;j+=2){
         const point=g.points[j], x=point.x-localCursor.x, y=point.y-localCursor.y;
         const reach=Math.exp(-(x*x+y*y)/.16);
         if(reach>influence){influence=reach;dx=x;}
@@ -155,9 +174,9 @@ function draw(time){
     spring(g,'x','vx',quiet?0:push+.16*impulse,dt);
     spring(g,'z','vz',quiet?0:-.10*influence+.035*impulse,dt);
   }
-  fibres.forEach(({g},i)=>{
-    const end=(i+1)*(nodes-1)*6;
-    for(let k=i*(nodes-1)*6;k<end;k+=3){
+  fibres.forEach((g,i)=>{
+    const end=(i+1)*nodes*3;
+    for(let k=i*nodes*3;k<end;k+=3){
       const weight=weights[k/3];
       positions[k]=rest[k]+g.x*weight;
       positions[k+1]=rest[k+1];

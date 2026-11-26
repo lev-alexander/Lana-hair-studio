@@ -5,7 +5,14 @@
 <script type="module">
 import * as T from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
 import {applyHairShader} from './hair-shader.mjs';
-const renderer=new T.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+let renderer;
+try {
+  renderer=new T.WebGLRenderer({antialias:true});
+} catch (error) {
+  document.querySelector('#status').textContent='WebGL is unavailable in this browser. Open this test on a WebGL-enabled device.';
+  document.querySelector('#turn').disabled=true;
+  throw error;
+}
 renderer.setSize(920,470,false);
 document.body.append(renderer.domElement);
 const stage=new T.Scene(); stage.background=new T.Color(0x100c10);
